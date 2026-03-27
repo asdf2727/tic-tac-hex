@@ -12,25 +12,32 @@ impl Display for Tile {
 	}
 }
 
-const LEAF_LOG_SIZE: u64 = 2;
-const LEAF_SIZE: usize = 1 << LEAF_LOG_SIZE;
+use crate::game_params::WIN_LEN;
 
-struct LeafChunk {
-	use_cnt: u64,
-	tiles: [[Tile; LEAF_SIZE]; LEAF_SIZE],
+pub(crate) type CheckResult = Result<(), ()>;
+pub trait LineChecker {
+	fn on_line(&mut self, line: &[Tile; WIN_LEN]) -> CheckResult;
 }
 
-impl LeafChunk {
-	fn new() -> LeafChunk {
-		LeafChunk {
+const CHUNK_LOG_SIZE: u64 = 2;
+const CHUNK_SIZE: usize = 1 << CHUNK_LOG_SIZE;
+
+struct Chunk {
+	use_cnt: u64,
+	tiles: [[Tile; CHUNK_SIZE]; CHUNK_SIZE],
+}
+
+impl Chunk {
+	fn new() -> Chunk {
+		Chunk {
 			use_cnt: 0,
-			tiles: [[Tile::Empty; LEAF_SIZE]; LEAF_SIZE]
+			tiles: [[Tile::Empty; CHUNK_SIZE]; CHUNK_SIZE]
 		}
 	}
 
 	fn get_tile(&self, x: usize, y: usize) -> Tile {
-		assert!(x < LEAF_SIZE);
-		assert!(y < LEAF_SIZE);
+		debug_assert!(x < CHUNK_SIZE);
+		debug_assert!(y < CHUNK_SIZE);
 		self.tiles[x][y]
 	}
 
@@ -43,24 +50,58 @@ impl LeafChunk {
 	fn is_empty(&self) -> bool { self.use_cnt == 0 }
 }
 
+struct NeighbourChunks<'a> {
+	chunks: [[Option<&'a Chunk>; 3]; 3]
+}
+
+impl NeighbourChunks<'_> {
+	fn get_tile(&self, mut x: i64, mut y: i64) -> Tile {
+		let mut idx = 1;
+		let mut idy = 1;
+		if x < 0 { idx -= 1; x -= CHUNK_SIZE as i64 }
+		else if x > CHUNK_SIZE as i64 { idx += 1; x += CHUNK_SIZE as i64 }
+		if y < 0 { idy -= 1; y -= CHUNK_SIZE as i64 }
+		else if y > CHUNK_SIZE as i64 { idy += 1; y += CHUNK_SIZE as i64 }
+		match self.chunks[idx][idy] {
+			None => Tile::Empty,
+			Some(chunk) => chunk.get_tile(x as usize, y as usize)
+		}
+	}
+
+	fn run_line_check<T: LineChecker>(&self, checker: &mut T) -> CheckResult {
+		debug_assert!(CHUNK_SIZE > WIN_LEN);
+		let min_x: i64 = if self.chunks[0][1].is_some() { 0 } else { 1 - WIN_LEN as i64 };
+		let min_y: i64 = if self.chunks[1][0].is_some() { 0 } else { 1 - WIN_LEN as i64 };
+		for x in min_x..CHUNK_SIZE as i64 {
+			let start_y = if x < 0 && self.chunks[0][0].is_some() { 0 } else { min_y };
+			for y in start_y..CHUNK_SIZE as i64 {
+				checker.on_line(&std::array::from_fn(|i| self.get_tile(x, y + i as i64)))?;
+				checker.on_line(&std::array::from_fn(|i| self.get_tile(x + i as i64, y)))?;
+				checker.on_line(&std::array::from_fn(|i| self.get_tile(x + i as i64, y + i as i64)))?;
+			}
+		}
+		Ok(())
+	}
+}
+
 const NODE_LOG_SIZE: u64 = 1;
 const NODE_SIZE: usize = 1 << NODE_LOG_SIZE;
 
-struct NodeChunk {
+struct QuadNode {
 	use_cnt: u64,
-	chd: [[Chunk; NODE_SIZE]; NODE_SIZE]
+	chd: [[QuadChd; NODE_SIZE]; NODE_SIZE],
 }
 
-enum Chunk {
+enum QuadChd {
 	Empty,
-	Leaf(Box<LeafChunk>),
-	Node(Box<NodeChunk>),
+	Leaf(Box<Chunk>),
+	Node(Box<QuadNode>),
 }
 
-impl Clone for Chunk {
+impl Clone for QuadChd {
 	fn clone(&self) -> Self {
 		match self {
-			Chunk::Empty => Chunk::Empty,
+			QuadChd::Empty => QuadChd::Empty,
 			_ => panic!("Attempted to clone non-empty chunk!")
 		}
 	}
@@ -68,74 +109,121 @@ impl Clone for Chunk {
 
 type Level = u64;
 
-impl NodeChunk {
-	fn new() -> NodeChunk {
-		NodeChunk {
+type NodeCheckResult = Result<Vec<(usize, usize)>, ()>;
+
+impl QuadNode {
+	fn new() -> QuadNode {
+		QuadNode {
 			use_cnt: 0,
-			chd: std::array::repeat(std::array::repeat(Chunk::Empty)),
+			chd: std::array::repeat(std::array::repeat(QuadChd::Empty)),
 		}
 	}
 
 	fn find_chd(&self, x: &mut usize, y: &mut usize, lvl: Level) -> (usize, usize) {
-		let scale = LEAF_LOG_SIZE + lvl * NODE_LOG_SIZE;
+		let scale = lvl * NODE_LOG_SIZE;
 		let idx = *x >> scale;
 		let idy = *y >> scale;
 		*x -= idx << scale;
 		*y -= idy << scale;
-		assert!(idx < NODE_SIZE);
-		assert!(idy < NODE_SIZE);
+		debug_assert!(idx < NODE_SIZE);
+		debug_assert!(idy < NODE_SIZE);
 		(idx, idy)
 	}
 
-	fn get_tile(&self, mut x: usize, mut y: usize, lvl: Level) -> Tile {
+	fn try_get_chunk_mut(&mut self, mut x: usize, mut y: usize, lvl: Level) -> Result<&mut Chunk, ()> {
 		let (idx, idy) = self.find_chd(&mut x, &mut y, lvl);
-		match &self.chd[idx][idy] {
-			Chunk::Empty => Tile::Empty,
-			Chunk::Leaf(chunk) => chunk.get_tile(x, y),
-			Chunk::Node(chunk) => chunk.get_tile(x, y, lvl - 1),
+
+		if match &self.chd[idx][idy] {
+			QuadChd::Empty => false,
+			QuadChd::Leaf(chunk) => chunk.is_empty(),
+			QuadChd::Node(chunk) => chunk.is_empty(),
+		} {
+			self.chd[idx][idy] = QuadChd::Empty;
+			self.use_cnt -= 1;
 		}
+
+		Ok(match &mut self.chd[idx][idy] {
+			QuadChd::Empty => return Err(()),
+			QuadChd::Leaf(chunk) => chunk.as_mut(),
+			QuadChd::Node(chunk) => chunk.try_get_chunk_mut(x, y, lvl - 1)?,
+		})
+	}
+	fn try_get_chunk(&mut self, x: usize, y: usize, lvl: Level) -> Result<&Chunk, ()> {
+		Ok(self.try_get_chunk_mut(x, y, lvl)?)
 	}
 
-	fn set_tile(&mut self, mut x: usize, mut y: usize, tile: Tile, lvl: Level) {
+	fn try_get_chunk_const(&self, mut x: usize, mut y: usize, lvl: Level) -> Result<&Chunk, ()> {
+		let (idx, idy) = self.find_chd(&mut x, &mut y, lvl);
+		Ok(match &self.chd[idx][idy] {
+			QuadChd::Empty => return Err(()),
+			QuadChd::Leaf(chunk) => chunk.as_ref(),
+			QuadChd::Node(chunk) => chunk.try_get_chunk_const(x, y, lvl - 1)?,
+		})
+	}
+
+	fn get_chunk_mut(&mut self, mut x: usize, mut y: usize, lvl: Level) -> &mut Chunk {
 		let (idx, idy) = self.find_chd(&mut x, &mut y, lvl);
 
-		// Create child if empty
-		if matches!(self.chd[idx][idy], Chunk::Empty)  {
-			if tile == Tile::Empty { return }
+		if matches!(self.chd[idx][idy], QuadChd::Empty)  {
 			self.chd[idx][idy] = match lvl {
-				0 => Chunk::Leaf(Box::new(LeafChunk::new())),
-				_ => Chunk::Node(Box::new(NodeChunk::new())),
+				0 => QuadChd::Leaf(Box::new(Chunk::new())),
+				_ => QuadChd::Node(Box::new(QuadNode::new())),
 			};
 			self.use_cnt += 1;
 		}
 
-		// Update child
 		match &mut self.chd[idx][idy] {
-			Chunk::Empty => unreachable!("Attempted to modify empty child node!"),
-			Chunk::Leaf(chunk) => chunk.set_tile(x, y, tile),
-			Chunk::Node(chunk) => chunk.set_tile(x, y, tile, lvl - 1),
+			QuadChd::Empty => unreachable!("Attempted to access empty child node!"),
+			QuadChd::Leaf(chunk) => chunk.as_mut(),
+			QuadChd::Node(chunk) => chunk.get_chunk_mut(x, y, lvl - 1),
 		}
-
-		// Delete child if empty
-		if tile != Tile::Empty { return }
-		if match &self.chd[idx][idy] {
-			Chunk::Empty => unreachable!("Attempted to delete empty child node!"),
-			Chunk::Leaf(chunk) => chunk.is_empty(),
-			Chunk::Node(chunk) => chunk.is_empty(),
-		} {
-			self.chd[idx][idy] = Chunk::Empty;
-			self.use_cnt -= 1;
-		}
+	}
+	fn get_chunk(&mut self, x: usize, y: usize, lvl: Level) -> &Chunk {
+		self.get_chunk_mut(x, y, lvl)
 	}
 
 	fn is_empty(&self) -> bool { self.use_cnt == 0 }
+
+	fn run_line_check<T: LineChecker>(&mut self, checker: &mut T, lvl: Level) -> NodeCheckResult {
+		let chd_size = 1 << lvl * NODE_LOG_SIZE;
+		let size = chd_size << NODE_LOG_SIZE;
+		let mut leaves = Vec::new();
+
+		for idx in 0..NODE_SIZE {
+			for idy in 0..NODE_SIZE {
+				let mut chd_leaves = Vec::new();
+				match &mut self.chd[idx][idy] {
+					QuadChd::Empty => {},
+					QuadChd::Leaf(_) => chd_leaves.push((0, 0)),
+					QuadChd::Node(chunk) => chd_leaves = chunk.run_line_check(checker, lvl - 1)?,
+				};
+
+				for (mut x, mut y) in chd_leaves {
+					x += chd_size * idx;
+					y += chd_size * idy;
+					if x == 0 || x == size - 1 || y == 0 || y == size - 1 { leaves.push((x, y)); }
+					for i in 0..3 {
+						for j in 0..3 {
+							let _ = self.try_get_chunk(x + i - 1, y + j - 1, lvl); // For cleanup
+						}
+					}
+					NeighbourChunks {
+						chunks: std::array::from_fn(|i|
+							std::array::from_fn(|j|
+								self.try_get_chunk_const(x + i - 1, y + j - 1, lvl).ok()))
+					}.run_line_check(checker)?
+				}
+			}
+		}
+		Ok(leaves)
+	}
 }
 
 pub struct GameMap {
-	off_x: i64,
-	off_y: i64,
+	off_x: usize,
+	off_y: usize,
 	lvl: Level,
-	quad_tree: NodeChunk,
+	quad_tree: QuadNode,
 }
 
 impl GameMap {
@@ -143,59 +231,97 @@ impl GameMap {
 		GameMap {
 			off_x: 0,
 			off_y: 0,
-			lvl: 1,
-			quad_tree: NodeChunk::new(),
+			lvl: 0,
+			quad_tree: QuadNode::new(),
 		}
 	}
 
-	pub fn get_tile(&self, mut x: i64, mut y: i64) -> Tile {
-		x += self.off_x;
-		y += self.off_y;
-		let max_pos = 1 << (LEAF_LOG_SIZE + self.lvl * NODE_LOG_SIZE);
-		if 0 > x || x >= max_pos || 0 > y || y >= max_pos {
-			return Tile::Empty
+	fn get_chunk(&mut self, x: usize, y: usize) -> Option<&Chunk> {
+		let max_pos = 1 << (self.lvl + 1) * NODE_LOG_SIZE;
+		if x >= max_pos || y >= max_pos {
+			return None
 		}
-		self.quad_tree.get_tile(x as usize, y as usize, self.lvl - 1)
+		match self.quad_tree.try_get_chunk(x, y, self.lvl) {
+			Err(()) => None,
+			Ok(chunk) => Some(chunk)
+		}
 	}
 
-	pub fn set_tile(&mut self, mut x: i64, mut y: i64, tile: Tile) {
-		x += self.off_x;
-		y += self.off_y;
+	pub fn get_tile(&mut self, x: i64, y: i64) -> Tile {
+		match self.get_chunk((x >> CHUNK_LOG_SIZE) as usize + self.off_x,
+		                     (y >> CHUNK_LOG_SIZE) as usize + self.off_y) {
+			None => Tile::Empty,
+			Some(chunk) => chunk.get_tile(x as usize & (CHUNK_SIZE - 1), y as usize & (CHUNK_SIZE - 1))
+		}
+	}
+
+	pub fn set_tile(&mut self, x: i64, y: i64, tile: Tile) {
+		let mut chk_x = (x >> CHUNK_LOG_SIZE) + self.off_x as i64;
+		let mut chk_y = (y >> CHUNK_LOG_SIZE) + self.off_y as i64;
 		loop {
-			let max_pos = 1 << (LEAF_LOG_SIZE + self.lvl * NODE_LOG_SIZE);
-			if 0 <= x && x < max_pos && 0 <= y && y < max_pos { break }
+			let max_pos = 1 << (self.lvl + 1) * NODE_LOG_SIZE;
+			if 0 <= chk_x && chk_x < max_pos as i64 && 0 <= chk_y && chk_y < max_pos as i64 { break }
 
-			let wrap_x = if x < 0 { NODE_SIZE - 1 } else { 0 };
-			let wrap_y = if y < 0 { NODE_SIZE - 1 } else { 0 };
-			let old_tree = std::mem::replace(&mut self.quad_tree, NodeChunk::new());
-			self.quad_tree.chd[wrap_x][wrap_y] = Chunk::Node(Box::new(old_tree));
+			let wrap_x = if chk_x < 0 { NODE_SIZE - 1 } else { 0 };
+			let wrap_y = if chk_y < 0 { NODE_SIZE - 1 } else { 0 };
+			let old_tree = std::mem::replace(&mut self.quad_tree, QuadNode::new());
+			self.quad_tree.chd[wrap_x][wrap_y] = QuadChd::Node(Box::new(old_tree));
 			self.quad_tree.use_cnt += 1;
 
-			let shift_x = max_pos * wrap_x as i64;
-			let shift_y = max_pos * wrap_y as i64;
+			let shift_x = max_pos * wrap_x;
+			let shift_y = max_pos * wrap_y;
 			self.off_x += shift_x;
 			self.off_y += shift_y;
-			x += shift_x;
-			y += shift_y;
+			chk_x += shift_x as i64;
+			chk_y += shift_y as i64;
 
 			self.lvl += 1;
 		}
-		self.quad_tree.set_tile(x as usize, y as usize, tile, self.lvl - 1)
+
+		self.quad_tree.get_chunk_mut(chk_x as usize, chk_y as usize, self.lvl)
+			.set_tile(x as usize & (CHUNK_SIZE - 1), y as usize & (CHUNK_SIZE - 1), tile)
 	}
 
-
+	fn run_line_check<T: LineChecker>(&mut self, checker: &mut T) -> CheckResult {
+		let leaves = self.quad_tree.run_line_check(checker, self.lvl)?;
+		for (x, y) in leaves {
+			for i in 0..3 {
+				for j in 0..3 {
+					let _ = self.get_chunk(x + i - 1, y + j - 1); // For cleanup
+				}
+			}
+			NeighbourChunks {
+				chunks: std::array::from_fn(|i|
+					std::array::from_fn(|j| {
+						let idx = x + i - 1;
+						let idy = y + j - 1;
+						let size = 1 << (NODE_LOG_SIZE * (self.lvl + 1));
+						if 0 >= idx || idx >= size || 0 >= idy || idy >= size { return None }
+						self.quad_tree.try_get_chunk_const(idx, idy, self.lvl).ok()
+					}))
+			}.run_line_check(checker)?
+		}
+		Ok(())
+	}
 }
 
 impl Display for GameMap {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-		let max_pos: i64 = 1 << (LEAF_LOG_SIZE + self.lvl * NODE_LOG_SIZE);
-		for x in -self.off_x..max_pos - self.off_x {
+		let max_pos: i64 = 1 << (CHUNK_LOG_SIZE + (self.lvl + 1) * NODE_LOG_SIZE);
+		for x in 0i64 - (CHUNK_SIZE * self.off_x) as i64..max_pos - (CHUNK_SIZE * self.off_x) as i64 {
 			write!(f, "{}", " ".repeat((max_pos - x) as usize))?;
-			for y in -self.off_y..max_pos - self.off_y {
+			for y in 0i64 - (CHUNK_SIZE * self.off_y) as i64..max_pos - (CHUNK_SIZE * self.off_y) as i64 {
 				let mut delim: char = ' ';
 				if y - (x >> 1) == 0 && (x & 1) != 0 { delim = '|'; }
 				if x == 0 { delim = '-'; }
-				write!(f, "{}{}", self.get_tile(x, y), delim)?
+
+				let tile = match self.quad_tree.try_get_chunk_const(((x >> CHUNK_LOG_SIZE) + self.off_x as i64) as usize,
+				                                                    ((y >> CHUNK_LOG_SIZE) + self.off_y as i64) as usize, self.lvl) {
+					Err(()) => Tile::Empty,
+					Ok(chunk) => chunk.get_tile(x as usize & (CHUNK_SIZE - 1), y as usize & (CHUNK_SIZE - 1))
+				};
+
+				write!(f, "{}{}", tile, delim)?
 			}
 			writeln!(f)?
 		}
