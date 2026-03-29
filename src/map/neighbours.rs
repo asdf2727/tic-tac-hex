@@ -14,7 +14,7 @@ impl Neighbours<'_> {
 		if y < 0 { idy -= 1; y += CHUNK_SIZE as i64 }
 		else if y >= CHUNK_SIZE as i64 { idy += 1; y -= CHUNK_SIZE as i64 }
 		debug_assert!(0 <= idx && idx < 3 && 0 <= idy && idy < 3);
-		match self.chunks[idx][idy] {
+		match &self.chunks[idx][idy] {
 			None => Tile::Empty,
 			Some(chunk) => chunk.get_tile(x as usize, y as usize)
 		}

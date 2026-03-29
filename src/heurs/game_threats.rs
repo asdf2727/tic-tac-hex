@@ -1,7 +1,10 @@
-use crate::game_params::WIN_LEN;
+use std::cmp::Ordering;
 use crate::map::{Neighbours, Tile};
 
+pub const WIN_LEN: usize = 6;
+
 #[derive(Debug)]
+#[derive(Eq, PartialEq)]
 pub struct GameThreats {
 	pub threats_x: [i64; WIN_LEN],
 	pub threats_o: [i64; WIN_LEN],
@@ -27,6 +30,24 @@ impl GameThreats {
 	}
 }
 
+impl Ord for GameThreats {
+	fn cmp(&self, other: &Self) -> Ordering {
+		for i in WIN_LEN - 1..0 {
+			match self.threats_x[i].cmp(&other.threats_x[i]) {
+				Ordering::Equal => {},
+				other => return other,
+			}
+		}
+		Ordering::Equal
+	}
+}
+
+impl PartialOrd<Self> for GameThreats {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		Some(self.cmp(other))
+	}
+}
+
 impl super::heuristic::Heuristic for GameThreats {
 	fn new() -> Box<GameThreats> {
 		Box::new(GameThreats {
@@ -34,6 +55,8 @@ impl super::heuristic::Heuristic for GameThreats {
 			threats_o: std::array::repeat(0),
 		})
 	}
+
+	fn get_extra(&self) -> i64 { (WIN_LEN - 1) as i64 }
 
 	fn run_heuristic(&mut self, neigh: &Neighbours, x: i64, y: i64, mult: i64) {
 		self.on_line(&std::array::from_fn(|i| neigh.get_tile(x, y + i as i64)), mult);

@@ -1,13 +1,15 @@
-use crate::game_params::WIN_LEN;
 use crate::map::Neighbours;
+use std::fmt::Debug;
 
-pub trait Heuristic {
+pub trait Heuristic: Debug + Ord {
 	fn new() -> Box<Self> where Self: Sized;
+
+	fn get_extra(&self) -> i64;
 
 	fn from(all: Vec<Neighbours>) -> Box<Self> where Self: Sized {
 		let mut new_threats: Box<Self> = Heuristic::new();
 		for neigh in all {
-			neigh.on_owned_tiles((WIN_LEN - 1) as i64, |x, y| {
+			neigh.on_owned_tiles(new_threats.get_extra(), |x, y| {
 				new_threats.run_heuristic(&neigh, x, y, 1);
 			});
 		}
@@ -16,8 +18,8 @@ pub trait Heuristic {
 
 	fn run_heuristic(&mut self, neigh: &Neighbours, x: i64, y: i64, mult: i64);
 
-	fn update(&mut self, neigh: &Neighbours, mult: i64) {
-		neigh.on_all_tiles((WIN_LEN - 1) as i64, |x, y| {
+	fn update(self: &mut Self, neigh: &Neighbours, mult: i64) {
+		neigh.on_all_tiles(self.get_extra(), |x, y| {
 			self.run_heuristic(neigh, x, y, mult)
 		});
 	}

@@ -8,3 +8,4 @@ mod neighbours;
 pub use tile::Tile;
 pub use neighbours::Neighbours;
 pub use game_map::GameMap;
+pub use game_map::Hash;

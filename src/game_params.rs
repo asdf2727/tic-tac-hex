@@ -1,1 +1,0 @@
-pub const WIN_LEN: usize = 6;
