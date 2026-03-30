@@ -3,4 +3,10 @@ name = "TicTacHex"
 version = "0.1.0"
 edition = "2024"
 
+[build]
+rustflags = ["-C", "force-frame-pointers=yes", "-C", "symbol-mangling-version=v0"]
+
+[profile.release]
+debug = "line-tables-only"
+
 [dependencies]
