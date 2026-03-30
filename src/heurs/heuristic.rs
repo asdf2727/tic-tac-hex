@@ -2,12 +2,14 @@ use crate::map::Neighbours;
 use std::fmt::Debug;
 
 pub trait Heuristic: Debug + Ord {
-	fn new() -> Box<Self> where Self: Sized;
+	fn new() -> Self;
+	fn new_max() -> Self;
+	fn new_min() -> Self;
 
 	fn get_extra(&self) -> i64;
 
-	fn from(all: Vec<Neighbours>) -> Box<Self> where Self: Sized {
-		let mut new_threats: Box<Self> = Heuristic::new();
+	fn from(all: Vec<Neighbours>) -> Self where Self: Sized {
+		let mut new_threats: Self = Heuristic::new();
 		for neigh in all {
 			neigh.on_owned_tiles(new_threats.get_extra(), |x, y| {
 				new_threats.run_heuristic(&neigh, x, y, 1);

@@ -1,4 +1,4 @@
-use super::{*};
+use super::*;
 
 pub const CHUNK_SIZE: usize = 1 << params::CHUNK_LOG_SIZE;
 

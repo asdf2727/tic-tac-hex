@@ -1,8 +1,9 @@
-use super::{*};
-use chunk::{*};
-use quad_node::{*};
-use params::{*};
-use super::super::heurs::Heuristic;
+use std::collections::HashSet;
+use super::*;
+use chunk::*;
+use quad_node::*;
+use params::*;
+use crate::heurs::*;
 
 pub type Hash = u64;
 
@@ -11,27 +12,31 @@ pub struct GameMap {
 	off_y: usize,
 	lvl: Level,
 	quad_tree: QuadNode,
-	heuristic: Box<dyn Heuristic>,
+	heuristic: GameMeasure,
 	hash: Hash,
+	move_list: Vec<(i64, i64)>,
 }
 
 impl GameMap {
-	pub fn new<T: Heuristic + 'static>() -> GameMap {
+	pub fn new() -> GameMap {
 		GameMap {
 			off_x: 1,
 			off_y: 1,
 			lvl: 1,
 			quad_tree: QuadNode::new(),
-			heuristic: T::new(),
+			heuristic: GameMeasure::new(),
 			hash: 0,
+			move_list: Vec::new(),
 		}
 	}
 
-	pub fn get_heuristic(&mut self) -> &dyn Heuristic {
-		&*self.heuristic
+	pub fn get_heuristic(&mut self) -> &GameMeasure {
+		&self.heuristic
 	}
 
 	pub fn get_hash(&self) -> Hash { self.hash }
+
+	pub fn get_move_list(&self) -> &Vec<(i64, i64)> { &self.move_list }
 
 	pub fn get_tile(&mut self, x: i64, y: i64) -> Tile {
 		let chk_x = (x >> CHUNK_LOG_SIZE) + self.off_x as i64;
@@ -105,7 +110,7 @@ impl GameMap {
 		Self::splitmix64((x ^ (y << 32)) as Hash ^ tile_hash)
 	}
 
-	pub fn set_tile(&mut self, x: i64, y: i64, tile: Tile) {
+	fn set_tile(&mut self, x: i64, y: i64, tile: Tile) {
 		let mut chk_x = (x >> CHUNK_LOG_SIZE) + self.off_x as i64;
 		let mut chk_y = (y >> CHUNK_LOG_SIZE) + self.off_y as i64;
 		loop {
@@ -144,6 +149,16 @@ impl GameMap {
 		if let Some(neigh) = GameMap::get_neighbours(&self.quad_tree, chk_x, chk_y, self.lvl) {
 			self.heuristic.update(&neigh, 1);
 		}
+	}
+
+	pub fn do_move(&mut self, x: i64, y: i64, tile: Tile) {
+		debug_assert!(!matches!(tile, Tile::Empty), "Don't move with empty tiles! Use undo_move instead.");
+		self.move_list.push((x, y));
+		self.set_tile(x, y, tile);
+	}
+	pub fn undo_move(&mut self) {
+		let last_move = self.move_list.pop().unwrap();
+		self.set_tile(last_move.0, last_move.1, Tile::Empty);
 	}
 }
 

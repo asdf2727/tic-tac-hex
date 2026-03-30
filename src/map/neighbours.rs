@@ -1,5 +1,5 @@
-use super::{*};
-use super::chunk::{*};
+use super::*;
+use super::chunk::*;
 
 pub struct Neighbours<'a> {
 	pub chunks: [[Option<&'a Chunk>; 3]; 3]

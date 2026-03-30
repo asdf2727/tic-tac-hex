@@ -1,4 +1,4 @@
-use super::{*};
+use super::*;
 use chunk::Chunk;
 use params::NODE_LOG_SIZE;
 

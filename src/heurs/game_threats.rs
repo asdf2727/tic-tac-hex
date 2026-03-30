@@ -49,11 +49,21 @@ impl PartialOrd<Self> for GameThreats {
 }
 
 impl super::heuristic::Heuristic for GameThreats {
-	fn new() -> Box<GameThreats> {
-		Box::new(GameThreats {
+	fn new() -> GameThreats {
+		GameThreats {
 			threats_x: std::array::repeat(0),
 			threats_o: std::array::repeat(0),
-		})
+		}
+	}
+	fn new_max() -> GameThreats {
+		let mut new_threats = GameThreats::new();
+		new_threats.threats_x[WIN_LEN - 1] = 1;
+		new_threats
+	}
+	fn new_min() -> GameThreats {
+		let mut new_threats = GameThreats::new();
+		new_threats.threats_o[WIN_LEN - 1] = 1;
+		new_threats
 	}
 
 	fn get_extra(&self) -> i64 { (WIN_LEN - 1) as i64 }
