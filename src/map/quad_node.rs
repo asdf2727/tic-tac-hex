@@ -5,7 +5,7 @@ use params::NODE_LOG_SIZE;
 pub const NODE_SIZE: usize = 1 << NODE_LOG_SIZE;
 
 pub struct QuadNode {
-	pub(super) chd: [[QuadChd; NODE_SIZE]; NODE_SIZE],
+	pub chd: [[QuadChd; NODE_SIZE]; NODE_SIZE],
 }
 
 pub enum QuadChd {
@@ -23,7 +23,7 @@ impl Clone for QuadChd {
 	}
 }
 
-pub type Level = u64;
+pub type Level = usize;
 
 impl QuadNode {
 	pub fn new() -> QuadNode {

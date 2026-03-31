@@ -84,7 +84,7 @@ impl GameMap {
 		self.update(x, y, Tile::Empty);
 	}
 
-	pub fn tree_level(&self) -> u64 { self.tree.lvl }
+	pub fn tree_level(&self) -> usize { self.tree.lvl }
 	pub fn clean_tree(&mut self) {
 		self.tree.clean();
 	}

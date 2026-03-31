@@ -48,9 +48,8 @@ impl GameThreats {
 
 impl Ord for GameThreats {
 	fn cmp(&self, other: &Self) -> Ordering {
-		match self.won_by().cmp(&other.won_by()) {
-			Ordering::Equal => {},
-			other => return other,
+		if self.won_by() != 0 || other.won_by() != 0 {
+			return self.won_by().cmp(&other.won_by());
 		}
 		for i in (0..WIN_LEN).rev() {
 			match self.threats_diff[i].cmp(&other.threats_diff[i]) {
@@ -131,20 +130,21 @@ impl Heuristic for GameThreats {
 			}
 		}
 
-		macro_rules! ret_not_zero {
-            ($x:expr) => { if $x != 0 { self.won_by = $x; return; } };
+		if self.threats_diff[WIN_LEN - 1] != 0 {
+			self.won_by = self.threats_diff[WIN_LEN - 1]; return;
 		}
+		self.won_by = 0;
 		if step & 2 == 0 {
-			if step & 1 == 0 { ret_not_zero!(-self.threats_o[WIN_LEN - 3]); }
-			ret_not_zero!(-self.threats_o[WIN_LEN - 2]);
-			ret_not_zero!(-self.threats_o[WIN_LEN - 1]);
-			self.won_by = self.threats_x[WIN_LEN - 1];
+			if (step & 1 == 0 && self.threats_o[WIN_LEN - 3] != 0) ||
+				self.threats_o[WIN_LEN - 2] != 0 {
+				self.won_by = -1;
+			}
 		}
 		else {
-			if step & 1 == 0 { ret_not_zero!(self.threats_x[WIN_LEN - 3]); }
-			ret_not_zero!(self.threats_x[WIN_LEN - 2]);
-			ret_not_zero!(self.threats_x[WIN_LEN - 1]);
-			self.won_by = -self.threats_o[WIN_LEN - 1];
+			if (step & 1 == 0 && self.threats_x[WIN_LEN - 3] != 0) ||
+				self.threats_x[WIN_LEN - 2] != 0 {
+				self.won_by = 1;
+			}
 		}
 	}
 }

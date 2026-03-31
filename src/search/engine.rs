@@ -4,36 +4,36 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 
-const MOVE_DIST: i64 = 1;
 #[derive(Clone, Copy, Debug)]
 #[derive(Eq, PartialEq)]
-pub struct SearchResult {
+enum SearchBound {
+	Lower,
+	Upper,
+	Exact,
+}
+
+#[derive(Clone, Copy, Debug)]
+#[derive(Eq, PartialEq)]
+struct SearchResult {
 	score: GameMeasure,
+	bound: SearchBound,
 	depth: u64,
 }
 
 impl SearchResult {
 	fn is_valid(&self, max_depth: u64) -> bool {
-		self.depth >= max_depth || self.score.won_by() != 0
-	}
-}
-
-impl Ord for SearchResult {
-	fn cmp(&self, other: &Self) -> Ordering {
-		self.score.cmp(&other.score).then(self.depth.cmp(&other.depth))
-	}
-}
-
-impl PartialOrd for SearchResult {
-	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-		Some(self.cmp(other))
+		self.depth >= max_depth || match self.bound {
+			SearchBound::Lower => self.score.won_by() > 0,
+			SearchBound::Upper => self.score.won_by() < 0,
+			SearchBound::Exact => self.score.won_by() != 0,
+		}
 	}
 }
 
 #[derive(Default, Debug, Clone, Copy)]
 struct Stats {
 	get_any_score: usize,
-	sort_moves: usize,
+	get_score: usize,
 	alpha_beta: usize,
 	tt_hits: usize,
 	tt_non_hits: usize,
@@ -45,6 +45,8 @@ pub struct Engine {
 	stats: Stats,
 }
 
+const MOVE_DIST: i64 = 1;
+
 impl Engine {
 	pub fn new(map: GameMap) -> Engine {
 		let mut eng = Engine {
@@ -54,6 +56,7 @@ impl Engine {
 		};
 		eng.tt.insert(eng.map.get_hash(), SearchResult {
 			score: *eng.map.get_heuristic(),
+			bound: SearchBound::Exact,
 			depth: 0,
 		});
 		eng
@@ -112,6 +115,7 @@ impl Engine {
 		self.map.place(x, y);
 		let result = SearchResult {
 			score: *self.map.get_heuristic(),
+			bound: SearchBound::Exact,
 			depth: self.map.get_depth(),
 		};
 		self.tt.insert(self.map.get_hash(), result.clone());
@@ -119,19 +123,16 @@ impl Engine {
 		result
 	}
 
-	pub fn sort_moves(&mut self) -> Vec<((i64, i64), SearchResult)> {
-		self.stats.sort_moves += 1;
-		let mut moves = self.move_candidates(MOVE_DIST).iter().map(
-			|&(x, y)| ((x, y), self.get_any_score(x, y))).collect::<Vec<_>>();
-		if self.map.get_player() == Tile::X {
-			moves.sort_by(|a, b| { a.1.cmp(&b.1).reverse() });
-		}
-		else {
-			moves.sort_by(|a, b| { a.1.cmp(&b.1) });
-		}
-		moves
+	fn get_score(&mut self, max_depth: u64, alpha: &GameMeasure, beta: &GameMeasure,
+	             x: i64, y: i64, eval: SearchResult) -> GameMeasure {
+		self.stats.get_score += 1;
+		if eval.is_valid(max_depth) { return eval.score }
+		self.map.place(x, y);
+		let result = self.alpha_beta(max_depth, *alpha, *beta);
+		self.tt.insert(self.map.get_hash(), result.clone());
+		self.map.undo();
+		result.score
 	}
-
 
 	fn alpha_beta(&mut self, max_depth: u64, mut alpha: GameMeasure, mut beta: GameMeasure) -> SearchResult {
 		self.stats.alpha_beta += 1;
@@ -143,39 +144,42 @@ impl Engine {
 		let now_heur = self.map.get_heuristic();
 		if depth >= max_depth + 2 || now_heur.won_by() != 0 ||
 			(depth >= max_depth && !now_heur.is_critical()) {
-			return SearchResult { score: *now_heur, depth };
+			return SearchResult { score: *now_heur, bound: SearchBound::Exact, depth };
 		}
 
-		let moves = self.sort_moves();
+		let mut moves = self.move_candidates(MOVE_DIST).iter()
+			.map(|&(x, y)| ((x, y), self.get_any_score(x, y)))
+			.collect::<Vec<_>>();
 
-		let mut val =
-			if self.map.get_player() == Tile::X { GameMeasure::new_min() }
-			else { GameMeasure::new_max() };
-
-	    for ((x, y), eval) in moves {
-			let score =
-				if eval.is_valid(max_depth) { eval.score }
-				else {
-					self.map.place(x, y);
-					let result = self.alpha_beta(max_depth, alpha, beta);
-					self.tt.insert(self.map.get_hash(), result.clone());
-					self.map.undo();
-					result.score
-				};
-		    if self.map.get_player() == Tile::X {
-			    val = val.max(score);
-			    alpha = alpha.max(score);
+		let mut val: GameMeasure;
+		if self.map.get_player() == Tile::X {
+			moves.sort_by(|a, b| {
+				a.1.score.cmp(&b.1.score).reverse().then(a.1.depth.cmp(&b.1.depth).reverse()) });
+			val = GameMeasure::new_min();
+			for ((x, y), eval) in moves {
+				let score = self.get_score(max_depth, &alpha, &beta, x, y, eval);
+				val = val.max(score);
+				alpha = alpha.max(score);
+				if alpha >= beta {
+					return SearchResult { score, bound: SearchBound::Lower, depth: max_depth };
+				}
 		    }
-		    else {
-		        val = val.min(score);
-		        beta = beta.min(score);
-		    }
-	        if alpha >= beta { break; }
-	    }
-		SearchResult {
-			score: val,
-			depth: max(max_depth, depth + 1),
 		}
+		else {
+			moves.sort_by(|a, b| {
+				a.1.score.cmp(&b.1.score).then(a.1.depth.cmp(&b.1.depth).reverse())
+			});
+			val = GameMeasure::new_max();
+			for ((x, y), eval) in moves {
+				let score = self.get_score(max_depth, &alpha, &beta, x, y, eval);
+				val = val.min(score);
+				beta = beta.min(score);
+				if alpha >= beta {
+					return SearchResult { score, bound: SearchBound::Upper, depth: max_depth };
+				}
+		    }
+		}
+		SearchResult { score: val, bound: SearchBound::Exact, depth: max_depth, }
 	}
 
 	pub fn run_search(&mut self, max_depth: u64) {
@@ -189,8 +193,25 @@ impl Engine {
 		debug_assert_eq!(*self.map.get_heuristic(), old_heur);
 	}
 
-	pub fn get_best_move(&mut self) -> ((i64, i64), SearchResult) {
-		*self.sort_moves().first().unwrap()
+	pub fn get_best_move(&mut self) -> (i64, i64) {
+		let mut moves = self.move_candidates(MOVE_DIST).iter()
+				.map(|&(x, y)| ((x, y), self.get_any_score(x, y)))
+				.collect::<Vec<_>>();
+		if self.map.get_player() == Tile::X {
+			moves.sort_by(|a, b| {
+				a.1.score.cmp(&b.1.score).reverse().then(a.1.depth.cmp(&b.1.depth).reverse()) });
+		}
+		else {
+			moves.sort_by(|a, b| {
+				a.1.score.cmp(&b.1.score).then(a.1.depth.cmp(&b.1.depth).reverse())
+			});
+		}
+		println!("{:?}", moves[0]);
+		println!("{:?}", moves[1]);
+		println!("{:?}", moves[2]);
+		println!("{:?}", moves[3]);
+		println!("{:?}", moves[4]);
+		moves[0].0
 	}
 
 	pub fn won_by(&self) -> i64 { self.map.get_heuristic().won_by() as i64 }
