@@ -4,9 +4,13 @@ version = "0.1.0"
 edition = "2024"
 
 [build]
-rustflags = ["-C", "force-frame-pointers=yes", "-C", "symbol-mangling-version=v0"]
+#rustflags = ["-C", "force-frame-pointers=yes", "-C", "symbol-mangling-version=v0"]
+rustflags = ["-C", "target-cpu=native"]
 
 [profile.release]
-debug = "line-tables-only"
+#debug = "line-tables-only"
+codegen-units = 1
+lto = "fat"
 
 [dependencies]
+colored = "3.1.1"

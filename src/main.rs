@@ -1,15 +1,21 @@
+use std::io::stdin;
 use crate::map::Heuristic;
 
 mod map;
 mod search;
 
+const MAX_DEPTH: u64 = 8;
 
 fn main() {
-	let mut game = search::Engine::new();
-	loop {
-		game.run_search(6);
-		let best_step = game.get_best_move();
-		game.do_step(best_step.0, best_step.1);
+	let mut map = map::GameMap::new(0);
+	let mut game = search::Engine::new(map);
+	print!("{:?}", game);
+	while game.won_by() == 0 {
+		game.run_search(MAX_DEPTH);
+		let ((x, y), score) = game.get_best_move();
+		game.place(x, y);
 		print!("{:?}", game);
+		println!("{:?}", score);
+
 	}
 }

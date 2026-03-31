@@ -6,7 +6,7 @@ use quad_node::*;
 pub struct QuadRoot {
 	off_x: usize,
 	off_y: usize,
-	lvl: Level,
+	pub lvl: Level,
 	quad_tree: QuadNode,
 }
 

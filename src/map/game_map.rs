@@ -8,20 +8,21 @@ pub type Hash = u64;
 pub struct GameMap {
 	tree: QuadRoot,
 	heuristic: GameMeasure,
-	hash: Hash,
 	move_list: Vec<(i64, i64)>,
+	hash: Hash,
+	step: u64,
 }
 
 impl GameMap {
-	pub fn new() -> GameMap {
+	pub fn new(start_step: u64) -> GameMap {
 		let mut gm = GameMap {
 			tree: QuadRoot::new(),
 			heuristic: GameMeasure::new(),
-			hash: 0,
 			move_list: Vec::new(),
+			hash: 0,
+			step: start_step,
 		};
-		gm.update(0, 0, Tile::X);
-		gm.heuristic.update_step(1);
+		gm.place_init(0, 0, Tile::X);
 		gm
 	}
 
@@ -29,9 +30,12 @@ impl GameMap {
 		&self.heuristic
 	}
 
-	pub fn get_hash(&self) -> Hash { self.hash }
-
 	pub fn get_move_list(&self) -> &Vec<(i64, i64)> { &self.move_list }
+
+	pub fn get_depth(&self) -> u64 { self.step }
+	pub fn get_player(&self) -> Tile {
+		if self.step & 2 != 0 { Tile::X } else { Tile::O }
+	}
 
 	/// See https://github.com/lemire/testingRNG/blob/master/source/splitmix64.h
 	const fn splitmix64(mut x: Hash) -> Hash {
@@ -49,6 +53,12 @@ impl GameMap {
 		Self::splitmix64((x ^ (y << 32)) as Hash ^ tile_hash)
 	}
 
+	pub fn get_hash(&self) -> Hash { self.hash }
+
+	pub fn peek_hash(&self, x: i64, y: i64) -> Hash {
+		self.hash ^ Self::get_tile_hash(x, y, self.get_player())
+	}
+
 	pub fn get_tile(&self, x: i64, y: i64) -> Tile { self.tree.get_tile(x, y) }
 
 	fn update(&mut self, x: i64, y: i64, tile: Tile) {
@@ -56,24 +66,25 @@ impl GameMap {
 		self.hash ^= Self::get_tile_hash(x, y, self.tree.set_tile(x, y, tile));
 		self.hash ^= Self::get_tile_hash(x, y, tile);
 		self.heuristic.update(&mut self.tree, x, y, 1);
+		self.heuristic.update_done(self.step);
 	}
-
-	pub fn place(&mut self, x: i64, y: i64, tile: Tile) {
-		debug_assert!(!matches!(tile, Tile::Empty), "Don't place empty tiles! Use undo_move instead.");
+	pub fn place_init(&mut self, x: i64, y: i64, tile: Tile) {
 		self.move_list.push((x, y));
 		self.update(x, y, tile);
-		self.heuristic.update_step(1);
+	}
+	pub fn place(&mut self, x: i64, y: i64) {
+		self.move_list.push((x, y));
+		let player = self.get_player();
+		self.step += 1;
+		self.update(x, y, player);
 	}
 	pub fn undo(&mut self) {
 		let (x, y) = self.move_list.pop().unwrap();
+		self.step -= 1;
 		self.update(x, y, Tile::Empty);
-		self.heuristic.update_step(-1);
 	}
 
-	pub fn peek_hash(&self, x: i64, y: i64, tile: Tile) -> Hash {
-		self.hash ^ Self::get_tile_hash(x, y, tile)
-	}
-
+	pub fn tree_level(&self) -> u64 { self.tree.lvl }
 	pub fn clean_tree(&mut self) {
 		self.tree.clean();
 	}
