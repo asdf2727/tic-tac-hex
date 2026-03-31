@@ -1,10 +1,10 @@
 use std::cmp::{min, Ordering};
+use std::fmt::Debug;
 use super::*;
 use quad_root::*;
 
 pub const WIN_LEN: usize = 6;
 
-#[derive(Debug)]
 #[derive(Clone, Copy)]
 #[derive(Eq, PartialEq)]
 pub struct GameThreats {
@@ -92,9 +92,9 @@ impl Heuristic for GameThreats {
 	}
 
 	fn is_critical(&self) -> bool {
-		self.threats_diff[WIN_LEN - 1] != 0 ||
-			self.threats_diff[WIN_LEN - 2] != 0 ||
-			self.threats_diff[WIN_LEN - 3] != 0
+		self.threats_x[WIN_LEN - 1] != 0 || self.threats_o[WIN_LEN - 1] != 0 ||
+		self.threats_x[WIN_LEN - 2] != 0 || self.threats_o[WIN_LEN - 2] != 0 ||
+		self.threats_x[WIN_LEN - 3] != 0 || self.threats_o[WIN_LEN - 3] != 0
 	}
 
 	fn won_by(&self) -> i16 { self.won_by }
@@ -146,5 +146,12 @@ impl Heuristic for GameThreats {
 				self.won_by = 1;
 			}
 		}
+	}
+}
+
+impl Debug for GameThreats {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "won_by: {}, threats_diff: {:?}",
+		       self.won_by, self.threats_diff)
 	}
 }

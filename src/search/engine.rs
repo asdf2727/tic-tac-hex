@@ -1,8 +1,10 @@
+use std::io::Write;
 use super::super::map::*;
 use std::cmp::*;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
+use std::io::stdout;
 
 #[derive(Clone, Copy, Debug)]
 #[derive(Eq, PartialEq)]
@@ -30,13 +32,21 @@ impl SearchResult {
 	}
 }
 
-#[derive(Default, Debug, Clone, Copy)]
+#[derive(Default, Clone, Copy)]
 struct Stats {
 	get_any_score: usize,
 	get_score: usize,
 	alpha_beta: usize,
 	tt_hits: usize,
-	tt_non_hits: usize,
+	tt_access: usize,
+}
+
+impl Debug for Stats {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		write!(f, "get_any_score: {}, get_score: {}, alpha_beta: {}\n",
+		       self.get_any_score, self.get_score, self.alpha_beta)?;
+		write!(f, "tt_acces: {} - {}", self.tt_access, self.tt_hits as f64 / self.tt_access as f64)
+	}
 }
 
 pub struct Engine {
@@ -107,18 +117,17 @@ impl Engine {
 
 	fn get_any_score(&mut self, x: i64, y: i64) -> SearchResult {
 		self.stats.get_any_score += 1;
+		self.stats.tt_access += 1;
 		if let Entry::Occupied(entry) = self.tt.entry(self.map.peek_hash(x, y)) {
 			self.stats.tt_hits += 1;
 			return *entry.get();
 		}
-		self.stats.tt_non_hits += 1;
 		self.map.place(x, y);
 		let result = SearchResult {
 			score: *self.map.get_heuristic(),
 			bound: SearchBound::Exact,
 			depth: self.map.get_depth(),
 		};
-		self.tt.insert(self.map.get_hash(), result.clone());
 		self.map.undo();
 		result
 	}
@@ -136,14 +145,17 @@ impl Engine {
 
 	fn alpha_beta(&mut self, max_depth: u64, mut alpha: GameMeasure, mut beta: GameMeasure) -> SearchResult {
 		self.stats.alpha_beta += 1;
-		if self.stats.alpha_beta % 1000000 == 0 {
-			println!("{:?}", self);
+		if self.stats.alpha_beta % 5000 == 0 {
+			//let out = stdout();
+			//let mut w = out.lock();
+			//write!(w, "\x1B[2J{:?}", self).unwrap();
+			//write!(w, "{:?}\n{:?}", alpha, beta);
+			//w.flush().unwrap();
 		}
 
 		let depth = self.map.get_depth();
 		let now_heur = self.map.get_heuristic();
-		if depth >= max_depth + 2 || now_heur.won_by() != 0 ||
-			(depth >= max_depth && !now_heur.is_critical()) {
+		if now_heur.won_by() != 0 || (depth >= max_depth && !now_heur.is_critical()) {
 			return SearchResult { score: *now_heur, bound: SearchBound::Exact, depth };
 		}
 
@@ -206,11 +218,6 @@ impl Engine {
 				a.1.score.cmp(&b.1.score).then(a.1.depth.cmp(&b.1.depth).reverse())
 			});
 		}
-		println!("{:?}", moves[0]);
-		println!("{:?}", moves[1]);
-		println!("{:?}", moves[2]);
-		println!("{:?}", moves[3]);
-		println!("{:?}", moves[4]);
 		moves[0].0
 	}
 

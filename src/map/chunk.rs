@@ -4,7 +4,7 @@ use tile::TILE_BITS;
 pub const CHUNK_SIZE: usize = 1 << params::CHUNK_LOG_SIZE;
 
 type ChunkData = u64;
-const DATA_ENTRIES: usize = (size_of::<ChunkData>() * 8 + 1) / TILE_BITS;
+const DATA_ENTRIES: usize = size_of::<ChunkData>() * 8 / TILE_BITS;
 const DATA_LEN: usize = (CHUNK_SIZE * CHUNK_SIZE + DATA_ENTRIES - 1) / DATA_ENTRIES;
 const TILE_MASK: ChunkData = (1 << TILE_BITS) - 1;
 
